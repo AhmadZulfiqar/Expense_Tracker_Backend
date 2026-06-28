@@ -12,7 +12,12 @@ const cors = require('cors');
 // On Vercel, it won't break if .env isn't pushed because variables are read directly from the dashboard panel
 require('dotenv').config(); 
 
-app.use(cors()); // Enable CORS for all routes
+// ❌ Replace app.use(cors()); with this:
+app.use(cors({
+    origin: '*', // Allows your mobile app and local previews to communicate
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride('_method'));
