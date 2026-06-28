@@ -8,18 +8,18 @@ const methodOverride = require('method-override');
 const User = require('./models/user');
 const cors = require('cors');
 
+// Always attempt to load dotenv safely for local environments
+// On Vercel, it won't break if .env isn't pushed because variables are read directly from the dashboard panel
+require('dotenv').config(); 
+
 app.use(cors()); // Enable CORS for all routes
 app.use(express.json());
-
-if (process.env.NODE_ENV !== 'production') {
-    require('dotenv').config(); 
-}
-
-// Configuration for Vercel
-app.set('views', path.join(process.cwd(), 'views'));
-app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride('_method'));
+
+// Robust path configurations for dynamic Serverless containers
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Environment variable connection safety fallback
@@ -28,19 +28,17 @@ const dbUrl = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/expenseTracker
 // Global placeholder kept as requested
 let TempUserId = null; 
 
-
-
 // Serverless Connection Cache to prevent Atlas connection storms
 let cachedConnection = null;
 async function connectDB() {
     if (cachedConnection && mongoose.connection.readyState === 1) return;
-    try{
+    try {
         cachedConnection = await mongoose.connect(dbUrl, {
-        serverSelectionTimeoutMS: 10000,
-        connectTimeoutMS: 10000
+            serverSelectionTimeoutMS: 10000,
+            connectTimeoutMS: 10000
         });
         console.log("MongoDB connected successfully");
-    }catch(err){
+    } catch (err) {
         console.error("MongoDB connection error:", err);
     }
 }
@@ -71,6 +69,9 @@ app.get("/find-tracker", (req, res) => {
 app.post("/find-tracker", async (req, res) => {
     const { email } = req.body;
     try {
+        if (!email) {
+            return res.render("findTracker.ejs", { error: "Please enter a valid email address." });
+        }
         const user = await User.findOne({ email: email.trim().toLowerCase() }).exec();
 
         if (!user) {
@@ -80,9 +81,7 @@ app.post("/find-tracker", async (req, res) => {
         }
         
         TempUserId = user._id; // Store the user ID globally
-        
-        // Fail-safe: also attach to URL so Vercel doesn't lose it if a container sleeps
-        res.json({ message: "Tracker found successfully", userId: user._id,name: user.name, email: user.email });
+        res.json({ message: "Tracker found successfully", userId: user._id, name: user.name, email: user.email });
     } catch (err) {
         console.error("Search Error:", err);
         res.status(500).send("An error occurred while searching for your tracker.");
@@ -98,9 +97,12 @@ app.get("/user", (req, res) => {
 app.post("/user", async (req, res) => {
     const { name, email } = req.body;
     try {
-        let getUser= await User.findOne({ email: email.trim().toLowerCase() }).exec();
+        if (!email || !name) {
+            return res.status(400).send("Name and Email are completely required fields.");
+        }
+        let getUser = await User.findOne({ email: email.trim().toLowerCase() }).exec();
         if (getUser) {
-            res.json({ message: "User already exists", userId: getUser._id });
+            return res.json({ message: "User already exists", userId: getUser._id });
         }
         const newUser = new User({ name: name.trim(), email: email.trim().toLowerCase() });
         await newUser.save();
@@ -117,18 +119,19 @@ app.post("/user", async (req, res) => {
 app.post("/expenselog", async (req, res) => {
     let { userId } = req.body;
     try {
-        // VERCEL FAIL-SAFE: If serverless wiped out TempUserId, rebuild it using the URL parameter
-        
+        let targetId = userId || TempUserId;
+        if (!targetId) {
+            return res.status(400).json({ error: "User ID is required to fetch expense logs." });
+        }
 
-        
+        let allData = await data.find({ userId: targetId }).exec();
+        let user = await User.findById(targetId).exec();
 
-        let allData = await data.find({ userId: userId }).exec();
-        let user = await User.findById(userId).exec();
-
-
+        if (!user) {
+            return res.status(404).json({ error: "User records profile not found." });
+        }
 
         const grandTotal = allData.reduce((sum, log) => sum + (Number(log.totalDaily) || 0), 0);
-        
         res.json({ logs: allData, userName: user.name, grandTotal: grandTotal });
     } catch (err) {
         console.error("Fetch Error:", err);
@@ -137,7 +140,6 @@ app.post("/expenselog", async (req, res) => {
 });
 
 app.get("/addexpense", (req, res) => {
-    // Rebuild global variable state if lost during transition tabs
     if (!TempUserId && req.query.userId) {
         TempUserId = req.query.userId;
     }
@@ -145,13 +147,12 @@ app.get("/addexpense", (req, res) => {
 });
 
 app.post("/addexpense", async (req, res) => {
-    
-
     let { petrol_amount, food_amount, others_amount, petrol_desc, food_desc, others_desc, userId } = req.body;
 
-    // Use the userId from the request body if available, otherwise use the global TempUserId
-    let fetchedUserId = userId;
-    
+    let fetchedUserId = userId || TempUserId;
+    if (!fetchedUserId) {
+        return res.status(400).send("User tracking identifier missing from request context.");
+    }
 
     let petrolNum = Number(petrol_amount) || 0;
     let foodNum = Number(food_amount) || 0;
@@ -159,7 +160,7 @@ app.post("/addexpense", async (req, res) => {
     let calculatedTotal = petrolNum + foodNum + othersNum;
 
     let newdata = new data({ 
-        userId: fetchedUserId, // Still tracking cleanly off your global property
+        userId: fetchedUserId, 
         petrol: petrolNum, 
         food: foodNum, 
         others: othersNum, 
@@ -207,7 +208,7 @@ app.put("/editexpense", async (req, res) => {
             totalDaily: updatedTotal 
         }, { runValidators: true, new: true }).exec();
 
-        TempUserId = updatedLog.userId; // Sync memory state
+        TempUserId = updatedLog.userId; 
         res.json({ message: "Expense updated successfully", userId: TempUserId });
     } catch (err) {
         console.error("Update Error:", err);
@@ -219,14 +220,14 @@ app.post("/deleteexpenses", async (req, res) => {
     let { logId , userId }= req.body;
     try {
         const deletedLog = await data.findByIdAndDelete(logId).exec();
-        TempUserId = deletedLog.userId; // Sync memory state
+        TempUserId = deletedLog.userId; 
         res.json({ message: "Expense deleted successfully", userId: TempUserId });
     } catch (err) {
         res.status(500).send("Failed to delete data");
     }
 });
 
-// Local Server Start
+// Local Server Start - Avoids crashing serverless processes on Vercel
 if (process.env.NODE_ENV !== 'production') {
     app.listen(port, () => {
         console.log(`Server is running on http://localhost:${port}`);
