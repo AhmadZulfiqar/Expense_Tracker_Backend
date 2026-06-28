@@ -1,0 +1,14 @@
+# ❌ Never upload your secret database passwords or keys
+.env
+
+# ❌ Never upload downloaded packages (Vercel will install these automatically)
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
