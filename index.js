@@ -11,7 +11,6 @@ const cors = require('cors');
 // Always attempt to load dotenv safely for local environments
 // On Vercel, it won't break if .env isn't pushed because variables are read directly from the dashboard panel
 require('dotenv').config(); 
-// Add this right below your app.use(cors(...)) setup:
 
 // ❌ Replace app.use(cors()); with this:
 app.use(cors({
@@ -20,7 +19,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
-app.options('*', cors()); // Responds cleanly to all browser preflight checks!
 app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride('_method'));
 
